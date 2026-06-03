@@ -1,8 +1,12 @@
----
-- name: Import VM Discovery Task
-  ansible.builtin.import_tasks: discovery.yml
-  when: proxmox_discover_vms | bool
+- name: Connect to Proxmox API, gather cluster information and register discovered VMs and templates
+  import_tasks: get_cluster_info.yml
 
-- name: Import VM Clone Template Task
-  ansible.builtin.import_tasks: create_vm_from_template.yml
-  when: proxmox_clone_template | bool
+- name: Loop VM interfaces to construct network interface definitions and prepare any SDN configuration if required
+  ansible.builtin.include_tasks: prepare_vm_networks.yml
+  loop: "{{ vm_interfaces }}"
+  loop_control:
+    loop_var: interface
+    index_var: idx
+
+- name: Create VM in Proxmox
+  import_tasks: create_vm.yml

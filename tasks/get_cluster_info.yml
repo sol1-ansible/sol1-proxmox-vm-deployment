@@ -1,0 +1,48 @@
+- name: Discover existing virtual machines and templates in the Proxmox cluster
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+  register: proxmox_discovered_vms
+
+- name: Check if the VM name is already in use in the Proxmox and the template exists
+  ansible.builtin.set_fact:
+    matching_vm: "{{ proxmox_discovered_vms.proxmox_vms | selectattr('name', 'equalto', inventory_hostname) | first | default({}) }}"
+    target_template: "{{ proxmox_discovered_vms.proxmox_vms | selectattr('name', 'equalto', template_name) | first | default({}) }}"
+
+- name: Check if the target template was found in the Proxmox cluster
+  ansible.builtin.assert:
+    that:
+      - target_template | length > 0
+      - target_template.template | bool
+    fail_msg: >-
+      The template_name provided was not found in the proxmox cluster or is not marked as a template. 
+      Please ensure the template exists and the template_name variable is set correctly.
+    success_msg: "Matching target_template found"
+
+- name: Block to handle setting VM vars if the VM already exists in Proxmox
+  when: matching_vm | length > 0
+  block:
+    - name: Set the VMID
+      ansible.builtin.set_fact:
+        proxmox_vmid: "{{ matching_vm.vmid }}"
+
+    - name: Update the target proxmox host if the VM exists and is on a different node
+      when: proxmox_target_host != matching_vm.node
+      block:
+        - name: Set the Proxmox target host
+          ansible.builtin.set_fact:
+            proxmox_target_host: "{{ matching_vm.node }}"
+
+        - name: Update proxmox_api_host to the target host if the matching node exists in the inventory
+          when: matching_vm.node in hostvars
+          ansible.builtin.set_fact:
+            proxmox_api_host: "{{ hostvars[matching_vm.node].ansible_host | default(matching_vm.node) }}"
+
+- name: Set the template ID and node if the VM does not exist in the cluster
+  when: matching_vm | length == 0
+  ansible.builtin.set_fact:
+    template_id: "{{ target_template.vmid }}"
+    proxmox_template_node: "{{ target_template.node }}"

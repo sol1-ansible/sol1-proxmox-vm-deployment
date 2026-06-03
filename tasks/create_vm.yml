@@ -1,0 +1,121 @@
+- name: Block to handle creating the VM if it doesn't already exist
+  when: matching_vm | length == 0
+  block:
+    - name: Clone the VM template, throttled to avoid overwhelming the Proxmox API
+      throttle: 1
+      community.proxmox.proxmox_kvm:
+        node: "{{ proxmox_template_node }}"
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        target: "{{ proxmox_target_host }}"
+        clone: "{{ template_name }}"
+        vmid: "{{ template_id }}"
+        name: "{{ inventory_hostname }}"
+        storage: "{{ proxmox_storage }}"
+        full: true
+        state: present
+        timeout: 120
+      register: clone_vm_job
+
+    - name: Set the new VMID from the template cloning operation
+      ansible.builtin.set_fact:
+        proxmox_vmid: "{{ clone_vm_job.vmid }}"
+
+    - name: Update the VM hardware settings based on the provided variables
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        node: "{{ proxmox_target_host }}"
+        name: "{{ inventory_hostname }}"
+        vmid: "{{ proxmox_vmid }}"
+        net: "{{ _pve_interfaces_dict }}"
+        cores: "{{ vm_vcpus | int }}"
+        sockets: "{{ vm_vsockets | int }}"
+        memory: "{{ vm_memory }}"
+        bootdisk: "{{ vm_bootdisk }}"
+        boot: "order={{ vm_bootdisk }}"
+        onboot: true
+        ostype: "{{ vm_ostype }}"
+        vga: "{{ vm_display }}"
+        agent: 'enabled=1'
+        update: true
+        update_unsafe: true
+
+    - name: Update cloud-init settings
+      when: vm_cloud_init
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        node: "{{ proxmox_target_host }}"
+        name: "{{ inventory_hostname }}"
+        vmid: "{{ proxmox_vmid }}"
+        ipconfig:
+          ipconfig0: "ip={{ vm_primary_ip }},gw={{ vm_gateway_ip }}"
+        nameservers: "{{ vm_dns_servers | default([]) }}"
+        sshkeys: "{{ vm_ssh_key | default('') }}"
+        citype: "{{ vm_citype }}"
+        ciupgrade: "{{ vm_ci_upgrade }}"
+        ciuser: "{{ vm_ciuser }}"
+        cipassword: "{{ vm_cipassword }}"
+        update: true
+        update_unsafe: true
+
+    - name: Grow the primary disk
+      community.proxmox.proxmox_disk:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        name: "{{ inventory_hostname }}"
+        vmid: "{{ proxmox_vmid }}"
+        disk: "{{ vm_bootdisk }}"
+        state: resized
+        size: "{{ vm_disk_size | int }}G"
+
+    - name: Start {{ inventory_hostname }}
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        node: "{{ proxmox_target_host }}"
+        name: "{{ inventory_hostname }}"
+        vmid: "{{ proxmox_vmid }}"
+        state: started
+      retries: 3
+      delay: 20
+
+- name: Update VM hardware settings on existing VM
+  when: matching_vm | length != 0
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ proxmox_api_host }}"
+    api_user: "{{ proxmox_api_user }}"
+    api_token_id: "{{ proxmox_api_token }}"
+    api_token_secret: "{{ proxmox_api_token_secret }}"
+    validate_certs: "{{ proxmox_validate_certs }}"
+    node: "{{ proxmox_target_host }}"
+    name: "{{ inventory_hostname }}"
+    vmid: "{{ proxmox_vmid }}"
+    net: "{{ _pve_interfaces_dict }}"
+    cores: "{{ vm_vcpus | int }}"
+    sockets: "{{ vm_vsockets | int }}"
+    memory: "{{ vm_memory }}"
+    bootdisk: "{{ vm_bootdisk }}"
+    boot: "order={{ vm_bootdisk }}"
+    onboot: true
+    ostype: "{{ vm_ostype }}"
+    vga: "{{ vm_display }}"
+    agent: 'enabled=1'
+    update: true
+    update_unsafe: true

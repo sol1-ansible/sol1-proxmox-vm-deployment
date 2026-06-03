@@ -1,8 +1,28 @@
----
-proxmox_autostart: true
-proxmox_api_user: "root@pam"
-proxmox_api_port: 8006
-proxmox_vm_state: "present"
+### Default variables for Proxmox VM deployment role, can be overridden in inventory or playbook vars as needed.
 
-proxmox_discover_vms: true
-proxmox_clone_template: false
+## Proxmox API behaviour.
+# Set to true if your Proxmox cluster presents trusted certificates.
+proxmox_validate_certs: false
+
+## Default VM hardware settings.
+# Default for linux OS, can be overridden per VM. Proxmox uses 'l26' for linux and 'win11' for windows.
+vm_ostype: l26 
+
+# Default display type for VMs, alternatives include std, virtio, vmware, etc.
+vm_display: qxl
+
+# Default boot disk assumes disks are defined as scsi. Adjust if using a different disk type (e.g., sata, virtio).
+vm_bootdisk: 'scsi0'
+
+# Defaults not using SDN Zones and VNets.
+use_sdn: false
+
+## Default cloud-init settings.
+# Enables cloudinit steps, check README for required variables.
+vm_cloud_init: true
+
+# Sets cloud-init to upgrade packages on first boot.
+vm_ci_upgrade: true
+
+# Default cloud-init type, nocloud for Linux, configdrive is the option for Windows.
+vm_citype: nocloud

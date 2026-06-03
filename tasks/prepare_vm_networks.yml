@@ -1,0 +1,77 @@
+- name: Block to handle the SDN and VNet management if use_sdn is true
+  when: use_sdn
+  block:
+    - name: Get existing SDN Zone details
+      community.proxmox.proxmox_zone_info:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        type: vlan
+      register: existing_sdn_zones
+
+    - name: Get existing vnet details
+      community.proxmox.proxmox_vnet_info:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+      register: existing_sdn_vnets
+
+    - name: Determine if the SDN Zone or VNET already exist in Proxmox
+      ansible.builtin.set_fact:
+        _zone_exists: "{{ existing_sdn_zones.zones | selectattr('zone', 'equalto', interface.sdn_zone_id) | list | length > 0 }}"
+        _vnet_exists: "{{ existing_sdn_vnets.vnets | selectattr('tag', 'equalto', interface.vlan_id) | list | length > 0 }}"
+
+    - name: Create the SDN zone
+      when: not _zone_exists
+      community.proxmox.proxmox_zone:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        type: "{{ interface.sdn_type }}"
+        zone: "{{ interface.sdn_zone_id }}"
+        ipam: "{{ interface.sdn_ipam }}"
+        bridge: "{{ interface.bridge }}"
+        state: present
+
+    - name: Create the vnet
+      when: not _vnet_exists
+      community.proxmox.proxmox_vnet:
+        api_host: "{{ proxmox_api_host }}"
+        api_user: "{{ proxmox_api_user }}"
+        api_token_id: "{{ proxmox_api_token }}"
+        api_token_secret: "{{ proxmox_api_token_secret }}"
+        validate_certs: "{{ proxmox_validate_certs }}"
+        vnet: "{{ 'vlan' ~ (interface.vlan_id | int) }}"
+        zone: "{{ interface.sdn_zone_id }}"
+        alias: "{{ interface.vlan_name }}"
+        tag: "{{ interface.vlan_id | int }}"
+        vlanaware: true
+        state: present
+
+    - name: Create the expected network interface variable for the VM deployment
+      ansible.builtin.set_fact:
+        _pve_interfaces_dict: >-
+          {{ _pve_interfaces_dict | default({}) | combine({
+            ('net' ~ (idx | string)): (interface.type | default('virtio'))
+              ~ (('=' ~ interface.mac) if (interface.mac is defined and interface.mac) else '')
+              ~ ',firewall=' ~ (interface.firewall | default('0'))
+              ~ ',bridge=vlan' ~ (interface.vlan_id | string)})
+          }}
+
+- name: Create the expected network interface variable for the VM deployment when not using SDN
+  when: not use_sdn
+  ansible.builtin.set_fact:
+    _pve_interfaces_dict: >-
+      {{ _pve_interfaces_dict | default({}) | combine({
+        ('net' ~ (idx | string)): (interface.type | default('virtio'))
+          ~ (('=' ~ interface.mac) if (interface.mac is defined and interface.mac) else '')
+          ~ ',firewall=' ~ (interface.firewall | default('0'))
+          ~ ',bridge=' ~ interface.bridge
+          ~ ((',tag=' ~ (interface.vlan_id | string)) if interface.vlan_id is defined else '')
+      }) }}
